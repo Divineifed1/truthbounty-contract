@@ -1,5 +1,6 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
+import "hardhat-gas-reporter";
 import * as dotenv from "dotenv";
 
 dotenv.config();
@@ -19,6 +20,15 @@ const config: HardhatUserConfig = {
   etherscan: {
     apiKey: {
       optimisticEthereum: process.env.OPTIMISM_ETHERSCAN_API_KEY || "",
+    }
+  },
+  gasReporter: {
+    enabled: true,
+    outputFile: ".gas-reports.json",
+    noColors: true,
+    excludeContracts: [],
+    snapshots: {
+      outputFile: ".gas-snapshots.json"
     }
   }
 };

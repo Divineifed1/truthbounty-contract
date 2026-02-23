@@ -1,0 +1,107 @@
+{
+  "timestamp": "2026-02-23",
+  "version": "1.0.0",
+  "critical_functions": {
+    "TruthBounty": {
+      "stake": {
+        "min": 66242,
+        "max": 83342,
+        "avg": 74792,
+        "calls": 2
+      },
+      "createClaim": {
+        "min": 149039,
+        "max": 149039,
+        "avg": 149039,
+        "calls": 1
+      },
+      "settleClaim": {
+        "min": 199243,
+        "max": 199243,
+        "avg": 199243,
+        "calls": 1
+      },
+      "vote": {
+        "min": 197654,
+        "max": 214776,
+        "avg": 206215,
+        "calls": 2
+      }
+    },
+    "TruthBountyWeighted": {
+      "stake": {
+        "min": 66242,
+        "max": 83342,
+        "avg": 70603,
+        "calls": 32
+      },
+      "createClaim": {
+        "min": 149027,
+        "max": 149135,
+        "avg": 149035,
+        "calls": 17
+      },
+      "settleClaim": {
+        "min": 119613,
+        "max": 219113,
+        "avg": 179323,
+        "calls": 6
+      },
+      "withdrawSettledStake": {
+        "min": 83659,
+        "max": 83659,
+        "avg": 83659,
+        "calls": 1
+      },
+      "withdrawStake": {
+        "min": 42477,
+        "max": 42477,
+        "avg": 42477,
+        "calls": 1
+      },
+      "vote": {
+        "min": 180554,
+        "max": 216886,
+        "avg": 201490,
+        "calls": 26
+      }
+    },
+    "TruthBountyClaims": {
+      "settleClaim": {
+        "min": 62605,
+        "max": 62617,
+        "avg": 62609,
+        "calls": 3
+      },
+      "settleClaimsBatch": {
+        "min": 94303,
+        "max": 1502161,
+        "avg": 669179,
+        "calls": 5
+      }
+    },
+    "Staking": {
+      "stake": {
+        "min": 54639,
+        "max": 115539,
+        "avg": 92303,
+        "calls": 20
+      },
+      "unstake": {
+        "min": 44451,
+        "max": 47963,
+        "avg": 45622,
+        "calls": 3
+      }
+    },
+    "VerifierSlashing": {
+      "batchSlash": {
+        "min": 438022,
+        "max": 438022,
+        "avg": 438022,
+        "calls": 3
+      }
+    }
+  },
+  "notes": "Baseline snapshot created from test run. Use for regression detection in CI."
+}

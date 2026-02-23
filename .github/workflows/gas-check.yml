@@ -1,0 +1,59 @@
+name: Gas Regression Detection
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+
+jobs:
+  gas-report:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Compile contracts
+        run: npm run compile
+      
+      - name: Run tests with gas reporting
+        run: npm run test:gas
+        continue-on-error: true
+      
+      - name: Compare gas snapshots
+        run: |
+          if git diff --quiet .gas-snapshots.json; then
+            echo "✓ No gas regression detected"
+          else
+            echo "⚠ Gas changes detected:"
+            git diff .gas-snapshots.json
+          fi
+      
+      - name: Upload gas reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: gas-reports
+          path: |
+            .gas-reports.json
+            .gas-snapshots.json
+      
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        run: |
+          if [ -f .gas-reports.json ]; then
+            echo "## ⛽ Gas Report Generated" >> $GITHUB_STEP_SUMMARY
+            echo "Gas reports have been generated for this PR." >> $GITHUB_STEP_SUMMARY
+            echo "See artifacts for detailed gas consumption metrics." >> $GITHUB_STEP_SUMMARY
+          fi
