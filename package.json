@@ -13,7 +13,6 @@
     "compile:forge": "forge build",
     "deploy": "hardhat run scripts/deploySlashing.ts",
     "verify": "hardhat run scripts/verify.ts",
-    "fuzz:campaign": "./scripts/run-fuzz-tests.sh"
     "fuzz:campaign": "./scripts/run-fuzz-tests.sh",
     "deploy:local": "npx hardhat ignition deploy ignition/modules/FullDeploy.ts",
     "deploy:testnet": "npx hardhat ignition deploy ignition/modules/FullDeploy.ts --network optimism_sepolia --parameters ignition/parameters/optimism_sepolia.json",
