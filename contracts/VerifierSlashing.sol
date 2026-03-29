@@ -4,6 +4,8 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
+import "./governance/GovernanceOwnable.sol";
+import "./governance/GovernanceHooks.sol";
 
 /**
  * @title VerifierSlashing
@@ -17,7 +19,7 @@ interface IStaking {
     function forceSlash(address user, uint256 amount) external;
 }
 
-contract VerifierSlashing is AccessControl, ReentrancyGuard, Pausable {
+contract VerifierSlashing is AccessControl, ReentrancyGuard, Pausable, GovernanceOwnable {
     
     // Role definitions
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -35,6 +37,10 @@ contract VerifierSlashing is AccessControl, ReentrancyGuard, Pausable {
     
     // Minimum time between slashes for the same verifier (anti-spam)
     uint256 public slashCooldown = 1 hours;
+    
+    // Governance parameter IDs
+    bytes32 public constant GOVERNANCE_PARAM_MAX_SLASH = keccak256("MAX_SLASH_PERCENTAGE");
+    bytes32 public constant GOVERNANCE_PARAM_COOLDOWN = keccak256("SLASH_COOLDOWN");
     
     IStaking public stakingContract;
     
@@ -86,7 +92,7 @@ contract VerifierSlashing is AccessControl, ReentrancyGuard, Pausable {
      * @param _stakingContract Address of the staking contract
      * @param _admin Address that will have admin privileges
      */
-    constructor(address _stakingContract, address _admin) {
+    constructor(address _stakingContract, address _admin, address _governanceController) {
         if (_stakingContract == address(0) || _admin == address(0)) {
             revert InvalidStakingContract();
         }
@@ -101,6 +107,9 @@ contract VerifierSlashing is AccessControl, ReentrancyGuard, Pausable {
         // Admin can grant/revoke resolver role
         _setRoleAdmin(RESOLVER_ROLE, ADMIN_ROLE);
         _setRoleAdmin(PAUSER_ROLE, ADMIN_ROLE);
+        
+        // Initialize governance
+        _initializeGovernance(_governanceController, _admin, _admin);
     }
     
     /**
@@ -319,7 +328,7 @@ contract VerifierSlashing is AccessControl, ReentrancyGuard, Pausable {
     function updateSlashingConfig(
         uint256 _maxSlashPercentage,
         uint256 _slashCooldown
-    ) external onlyRole(ADMIN_ROLE) {
+    ) external onlyGovernanceOrAdmin {
         require(_maxSlashPercentage <= MAX_SLASH_PERCENTAGE, "Percentage too high");
         require(_slashCooldown <= 7 days, "Cooldown too long");
         
@@ -333,7 +342,7 @@ contract VerifierSlashing is AccessControl, ReentrancyGuard, Pausable {
      * @dev Update the staking contract address
      * @param _stakingContract New staking contract address
      */
-    function updateStakingContract(address _stakingContract) external onlyRole(ADMIN_ROLE) {
+    function updateStakingContract(address _stakingContract) external onlyGovernanceOrAdmin {
         if (_stakingContract == address(0)) {
             revert InvalidStakingContract();
         }
@@ -346,7 +355,7 @@ contract VerifierSlashing is AccessControl, ReentrancyGuard, Pausable {
      * @dev Grant resolver role to an address (typically the settlement contract)
      * @param account Address to grant the role to
      */
-    function grantResolverRole(address account) external onlyRole(ADMIN_ROLE) {
+    function grantResolverRole(address account) external onlyGovernanceOrAdmin {
         _grantRole(RESOLVER_ROLE, account);
     }
     
@@ -354,7 +363,7 @@ contract VerifierSlashing is AccessControl, ReentrancyGuard, Pausable {
      * @dev Revoke resolver role from an address
      * @param account Address to revoke the role from
      */
-    function revokeResolverRole(address account) external onlyRole(ADMIN_ROLE) {
+    function revokeResolverRole(address account) external onlyGovernanceOrAdmin {
         _revokeRole(RESOLVER_ROLE, account);
     }
 
@@ -362,7 +371,7 @@ contract VerifierSlashing is AccessControl, ReentrancyGuard, Pausable {
      * @dev Grant settlement role to an address (Legacy alias)
      * @param account Address to grant the role to
      */
-    function grantSettlementRole(address account) external onlyRole(ADMIN_ROLE) {
+    function grantSettlementRole(address account) external onlyGovernanceOrAdmin {
         _grantRole(SETTLEMENT_ROLE, account);
     }
     
@@ -370,8 +379,36 @@ contract VerifierSlashing is AccessControl, ReentrancyGuard, Pausable {
      * @dev Revoke settlement role from an address (Legacy alias)
      * @param account Address to revoke the role from
      */
-    function revokeSettlementRole(address account) external onlyRole(ADMIN_ROLE) {
+    function revokeSettlementRole(address account) external onlyGovernanceOrAdmin {
         _revokeRole(SETTLEMENT_ROLE, account);
+    }
+    
+    // ============ Governance Parameter Updates ============
+    
+    /**
+     * @notice Update maximum slash percentage ( governance or admin )
+     * @param newPercentage New maximum slash percentage
+     */
+    function setMaxSlashPercentage(uint256 newPercentage) external onlyGovernanceOrAdmin {
+        require(newPercentage <= MAX_SLASH_PERCENTAGE, "Percentage too high");
+        
+        uint256 old = maxSlashPercentage;
+        maxSlashPercentage = newPercentage;
+        
+        emit ParameterUpdatedByGovernance(GOVERNANCE_PARAM_MAX_SLASH, old, newPercentage);
+    }
+    
+    /**
+     * @notice Update slash cooldown ( governance or admin )
+     * @param newCooldown New cooldown period
+     */
+    function setSlashCooldown(uint256 newCooldown) external onlyGovernanceOrAdmin {
+        require(newCooldown <= 7 days, "Cooldown too long");
+        
+        uint256 old = slashCooldown;
+        slashCooldown = newCooldown;
+        
+        emit ParameterUpdatedByGovernance(GOVERNANCE_PARAM_COOLDOWN, old, newCooldown);
     }
     
     /**

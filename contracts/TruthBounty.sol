@@ -6,6 +6,8 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
+import "./governance/GovernanceOwnable.sol";
+import "./governance/GovernanceHooks.sol";
 
 /**
  * @title TruthBountyToken
@@ -102,7 +104,7 @@ contract TruthBountyToken is ERC20, AccessControl {
  * @title TruthBounty
  * @notice Main contract for claim verification, voting, and settlement
  */
-contract TruthBounty is AccessControl, ReentrancyGuard, Pausable {
+contract TruthBounty is AccessControl, ReentrancyGuard, Pausable, GovernanceOwnable {
     // ============ Roles ============
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -156,12 +158,19 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable {
     mapping(address => VerifierStake) public verifierStakes;
     mapping(address => uint256) public verifierRewards;
 
-    // Configuration
-    uint256 public constant VERIFICATION_WINDOW_DURATION = 7 days;
-    uint256 public constant MIN_STAKE_AMOUNT = 100 * 10**18;
-    uint256 public constant SETTLEMENT_THRESHOLD_PERCENT = 60;
-    uint256 public constant REWARD_PERCENT = 80;
-    uint256 public constant SLASH_PERCENT = 20;
+    // Configuration ( Governance-controlled parameters )
+    uint256 public verificationWindowDuration = 7 days;
+    uint256 public minStakeAmount = 100 * 10**18;
+    uint256 public settlementThresholdPercent = 60;
+    uint256 public rewardPercent = 80;
+    uint256 public slashPercent = 20;
+    
+    // Governance parameter IDs for reference
+    bytes32 public constant GOVERNANCE_PARAM_VERIFICATION_WINDOW = keccak256("VERIFICATION_WINDOW_DURATION");
+    bytes32 public constant GOVERNANCE_PARAM_MIN_STAKE = keccak256("MIN_STAKE_AMOUNT");
+    bytes32 public constant GOVERNANCE_PARAM_THRESHOLD = keccak256("SETTLEMENT_THRESHOLD_PERCENT");
+    bytes32 public constant GOVERNANCE_PARAM_REWARD = keccak256("REWARD_PERCENT");
+    bytes32 public constant GOVERNANCE_PARAM_SLASH = keccak256("SLASH_PERCENT");
 
     // State
     uint256 public claimCounter;
@@ -178,7 +187,7 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable {
     event StakeWithdrawn(address indexed verifier, uint256 amount);
     event RewardsClaimed(address indexed verifier, uint256 amount);
 
-    constructor(address _bountyToken, address initialAdmin) {
+    constructor(address _bountyToken, address initialAdmin, address _governanceController) {
         require(_bountyToken != address(0), "Invalid token address");
         require(initialAdmin != address(0), "Invalid admin address");
         
@@ -191,11 +200,14 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable {
         _setRoleAdmin(RESOLVER_ROLE, ADMIN_ROLE);
         _setRoleAdmin(TREASURY_ROLE, ADMIN_ROLE);
         _setRoleAdmin(PAUSER_ROLE, ADMIN_ROLE);
+        
+        // Initialize governance
+        _initializeGovernance(_governanceController, initialAdmin, initialAdmin);
     }
 
     function createClaim(string memory content) external whenNotPaused returns (uint256) {
         uint256 claimId = claimCounter++;
-        uint256 verificationWindowEnd = block.timestamp + VERIFICATION_WINDOW_DURATION;
+        uint256 verificationWindowEnd = block.timestamp + verificationWindowDuration;
 
         claims[claimId] = Claim({
             id: claimId,
@@ -214,7 +226,7 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable {
     }
 
     function stake(uint256 amount) external nonReentrant whenNotPaused {
-        require(amount >= MIN_STAKE_AMOUNT, "Stake below minimum");
+        require(amount >= minStakeAmount, "Stake below minimum");
         require(bountyToken.transferFrom(msg.sender, address(this), amount), "Transfer failed");
 
         verifierStakes[msg.sender].totalStaked += amount;
@@ -228,7 +240,7 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable {
         require(block.timestamp < claim.verificationWindowEnd, "Verification window closed");
         require(!claim.settled, "Claim already settled");
         require(!votes[claimId][msg.sender].voted, "Already voted");
-        require(stakeAmount >= MIN_STAKE_AMOUNT, "Stake below minimum");
+        require(stakeAmount >= minStakeAmount, "Stake below minimum");
         require(verifierStakes[msg.sender].totalStaked >= verifierStakes[msg.sender].activeStakes + stakeAmount, "Insufficient available stake");
 
         verifierStakes[msg.sender].activeStakes += stakeAmount;
@@ -267,7 +279,7 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable {
         uint256 totalStake = stakedFor + stakedAgainst;
         if (totalStake == 0) return false;
         uint256 forPercent = (stakedFor * 100) / totalStake;
-        return forPercent >= SETTLEMENT_THRESHOLD_PERCENT;
+        return forPercent >= settlementThresholdPercent;
     }
 
     function _calculateSettlement(uint256 claimId, bool passed) internal returns (uint256 rewardAmount, uint256 slashedAmount) {
@@ -275,8 +287,8 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable {
         uint256 winnerStake = passed ? claim.totalStakedFor : claim.totalStakedAgainst;
         uint256 loserStake = passed ? claim.totalStakedAgainst : claim.totalStakedFor;
 
-        slashedAmount = (loserStake * SLASH_PERCENT) / 100;
-        rewardAmount = (slashedAmount * REWARD_PERCENT) / 100;
+        slashedAmount = (loserStake * slashPercent) / 100;
+        rewardAmount = (slashedAmount * rewardPercent) / 100;
 
         totalSlashed += slashedAmount;
         totalRewarded += rewardAmount;
@@ -339,6 +351,73 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable {
 
     function getVerifierStake(address verifier) external view returns (VerifierStake memory) {
         return verifierStakes[verifier];
+    }
+
+    // ============ Governance Parameter Updates ============
+    
+    /**
+     * @notice Update verification window duration ( governance or admin )
+     * @param newDuration New duration in seconds
+     */
+    function setVerificationWindowDuration(uint256 newDuration) external onlyGovernanceOrAdmin {
+        require(newDuration >= 1 days && newDuration <= 30 days, "Invalid duration");
+        
+        uint256 oldDuration = verificationWindowDuration;
+        verificationWindowDuration = newDuration;
+        
+        emit ParameterUpdatedByGovernance(GOVERNANCE_PARAM_VERIFICATION_WINDOW, oldDuration, newDuration);
+    }
+    
+    /**
+     * @notice Update minimum stake amount ( governance or admin )
+     * @param newAmount New minimum stake amount
+     */
+    function setMinStakeAmount(uint256 newAmount) external onlyGovernanceOrAdmin {
+        require(newAmount > 0, "Invalid amount");
+        
+        uint256 oldAmount = minStakeAmount;
+        minStakeAmount = newAmount;
+        
+        emit ParameterUpdatedByGovernance(GOVERNANCE_PARAM_MIN_STAKE, oldAmount, newAmount);
+    }
+    
+    /**
+     * @notice Update settlement threshold percentage ( governance or admin )
+     * @param newThreshold New threshold ( 1-100 )
+     */
+    function setSettlementThresholdPercent(uint256 newThreshold) external onlyGovernanceOrAdmin {
+        require(newThreshold > 0 && newThreshold <= 100, "Invalid threshold");
+        
+        uint256 old = settlementThresholdPercent;
+        settlementThresholdPercent = newThreshold;
+        
+        emit ParameterUpdatedByGovernance(GOVERNANCE_PARAM_THRESHOLD, old, newThreshold);
+    }
+    
+    /**
+     * @notice Update reward percentage ( governance or admin )
+     * @param newPercent New reward percent ( 1-100 )
+     */
+    function setRewardPercent(uint256 newPercent) external onlyGovernanceOrAdmin {
+        require(newPercent > 0 && newPercent <= 100, "Invalid percent");
+        
+        uint256 old = rewardPercent;
+        rewardPercent = newPercent;
+        
+        emit ParameterUpdatedByGovernance(GOVERNANCE_PARAM_REWARD, old, newPercent);
+    }
+    
+    /**
+     * @notice Update slash percentage ( governance or admin )
+     * @param newPercent New slash percent ( 1-100 )
+     */
+    function setSlashPercent(uint256 newPercent) external onlyGovernanceOrAdmin {
+        require(newPercent > 0 && newPercent <= 100, "Invalid percent");
+        
+        uint256 old = slashPercent;
+        slashPercent = newPercent;
+        
+        emit ParameterUpdatedByGovernance(GOVERNANCE_PARAM_SLASH, old, newPercent);
     }
 
     // ============ Admin & Pauser Functions ============

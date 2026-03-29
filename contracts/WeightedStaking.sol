@@ -4,6 +4,8 @@ pragma solidity ^0.8.20;
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "./IReputationOracle.sol";
+import "./governance/GovernanceOwnable.sol";
+import "./governance/GovernanceHooks.sol";
 
 /**
  * @title WeightedStaking
@@ -17,7 +19,7 @@ import "./IReputationOracle.sol";
  * - Prevents low-reputation dominance through minimum thresholds
  * - Emergency fallback to equal weighting
  */
-contract WeightedStaking is AccessControl, ReentrancyGuard {
+contract WeightedStaking is AccessControl, ReentrancyGuard, GovernanceOwnable {
     // ============ Roles ============
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -41,6 +43,12 @@ contract WeightedStaking is AccessControl, ReentrancyGuard {
 
     /// @notice Whether to use weighted staking (can be disabled in emergencies)
     bool public weightedStakingEnabled = true;
+    
+    // Governance parameter IDs
+    bytes32 public constant GOVERNANCE_PARAM_MIN_REP = keccak256("MIN_REPUTATION_SCORE");
+    bytes32 public constant GOVERNANCE_PARAM_MAX_REP = keccak256("MAX_REPUTATION_SCORE");
+    bytes32 public constant GOVERNANCE_PARAM_DEFAULT_REP = keccak256("DEFAULT_REPUTATION_SCORE");
+    bytes32 public constant GOVERNANCE_PARAM_WEIGHTED_ENABLED = keccak256("WEIGHTED_STAKING_ENABLED");
 
     // ============ Structs ============
 
@@ -80,7 +88,7 @@ contract WeightedStaking is AccessControl, ReentrancyGuard {
      * @notice Initialize the weighted staking contract
      * @param _reputationOracle Address of the reputation oracle contract
      */
-    constructor(address _reputationOracle, address initialAdmin) {
+    constructor(address _reputationOracle, address initialAdmin, address _governanceController) {
         if (_reputationOracle == address(0)) revert InvalidReputationOracle();
         require(initialAdmin != address(0), "Invalid admin address");
         
@@ -88,6 +96,9 @@ contract WeightedStaking is AccessControl, ReentrancyGuard {
         
         _grantRole(DEFAULT_ADMIN_ROLE, initialAdmin);
         _grantRole(ADMIN_ROLE, initialAdmin);
+        
+        // Initialize governance
+        _initializeGovernance(_governanceController, initialAdmin, initialAdmin);
     }
 
     // ============ Core Functions ============
@@ -267,10 +278,51 @@ contract WeightedStaking is AccessControl, ReentrancyGuard {
      * @notice Enable or disable weighted staking (emergency toggle)
      * @param _enabled Whether to enable weighted staking
      */
-    function setWeightedStakingEnabled(bool _enabled) external onlyRole(ADMIN_ROLE) {
+    function setWeightedStakingEnabled(bool _enabled) external onlyGovernanceOrAdmin {
         weightedStakingEnabled = _enabled;
 
         emit WeightedStakingToggled(_enabled);
+    }
+
+    // ============ Governance Parameter Updates ============
+    
+    /**
+     * @notice Update minimum reputation score ( governance or admin )
+     * @param newMinScore New minimum score
+     */
+    function setMinReputationScore(uint256 newMinScore) external onlyGovernanceOrAdmin {
+        require(newMinScore > 0 && newMinScore < maxReputationScore, "Invalid min score");
+        
+        uint256 old = minReputationScore;
+        minReputationScore = newMinScore;
+        
+        emit ParameterUpdatedByGovernance(GOVERNANCE_PARAM_MIN_REP, old, newMinScore);
+    }
+    
+    /**
+     * @notice Update maximum reputation score ( governance or admin )
+     * @param newMaxScore New maximum score
+     */
+    function setMaxReputationScore(uint256 newMaxScore) external onlyGovernanceOrAdmin {
+        require(newMaxScore > minReputationScore, "Invalid max score");
+        
+        uint256 old = maxReputationScore;
+        maxReputationScore = newMaxScore;
+        
+        emit ParameterUpdatedByGovernance(GOVERNANCE_PARAM_MAX_REP, old, newMaxScore);
+    }
+    
+    /**
+     * @notice Update default reputation score ( governance or admin )
+     * @param newDefaultScore New default score
+     */
+    function setDefaultReputationScoreByGov(uint256 newDefaultScore) external onlyGovernanceOrAdmin {
+        require(newDefaultScore > 0, "Invalid default score");
+        
+        uint256 old = defaultReputationScore;
+        defaultReputationScore = newDefaultScore;
+        
+        emit ParameterUpdatedByGovernance(GOVERNANCE_PARAM_DEFAULT_REP, old, newDefaultScore);
     }
 
     // ============ View Functions ============
