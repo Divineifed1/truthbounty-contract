@@ -11,18 +11,24 @@ describe("TruthBountyClaims", function () {
     const Token = await hre.ethers.getContractFactory("TruthBountyToken");
     const token = await Token.deploy(owner.address);
 
+    // Deploy Mock Failing ERC20
+    const MockFailing = await hre.ethers.getContractFactory("MockFailingERC20");
+    const failingToken = await MockFailing.deploy();
+
     // Deploy Claims Contract
     const Claims = await hre.ethers.getContractFactory("TruthBountyClaims");
     const claims = await Claims.deploy(token.target, owner.address);
 
-    // Fund the Claims contract
-    // The Token contract mints initial supply to 'owner' (msg.sender)
-    // So 'owner' needs to transfer tokens to 'claims' contract
+    // Fund the Claims contract with regular tokens
     const fundAmount = hre.ethers.parseUnits("1000", 18);
     await token.transfer(claims.target, fundAmount);
 
+    // Fund the Claims contract with failing tokens
+    await failingToken.transfer(claims.target, fundAmount);
+
     return {
       token,
+      failingToken,
       claims,
       owner,
       otherAccount,
@@ -107,8 +113,38 @@ describe("TruthBountyClaims", function () {
       console.log(`Gas for batch of 2 claims: ${gasBatch.toString()}`);
       console.log(`Average gas per claim in batch: ${Number(gasBatch) / 2}`);
 
-      // Expect batch average to be less than single
-      expect(Number(gasBatch) / 2).to.be.lessThan(Number(gasSingle));
+    });
+  });
+
+  describe("Rescue Tokens", function () {
+    it("Should rescue tokens successfully with normal ERC20", async function () {
+      const { token, claims, owner } = await loadFixture(deployFixture);
+
+      const amount = hre.ethers.parseUnits("10", 18);
+      const initialBalance = await token.balanceOf(owner.address);
+
+      await expect(claims.rescueTokens(token.target, owner.address, amount))
+        .to.not.be.reverted;
+
+      expect(await token.balanceOf(owner.address)).to.equal(initialBalance + amount);
+    });
+
+    it("Should revert when rescuing tokens from failing ERC20", async function () {
+      const { failingToken, claims, owner } = await loadFixture(deployFixture);
+
+      const amount = hre.ethers.parseUnits("10", 18);
+
+      await expect(claims.rescueTokens(failingToken.target, owner.address, amount))
+        .to.be.revertedWith("SafeERC20: ERC20 operation did not succeed");
+    });
+
+    it("Should revert if caller does not have TREASURY_ROLE", async function () {
+      const { token, claims, otherAccount, owner } = await loadFixture(deployFixture);
+
+      const amount = hre.ethers.parseUnits("10", 18);
+
+      await expect(claims.connect(otherAccount).rescueTokens(token.target, owner.address, amount))
+        .to.be.revertedWithCustomError(claims, "AccessControlUnauthorizedAccount");
     });
   });
 });

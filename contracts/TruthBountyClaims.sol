@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 /**
@@ -11,6 +12,8 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
  *      Focuses on gas efficiency and loop safety.
  */
 contract TruthBountyClaims is AccessControl, ReentrancyGuard {
+    using SafeERC20 for IERC20;
+
     // ============ Roles ============
 
     bytes32 public constant ADMIN_ROLE = keccak256("ADMIN_ROLE");
@@ -77,8 +80,7 @@ contract TruthBountyClaims is AccessControl, ReentrancyGuard {
         require(amount > 0, "Amount must be > 0");
 
         // The contract must hold enough tokens to cover the transfer
-        bool success = bountyToken.transfer(beneficiary, amount);
-        require(success, "Transfer failed");
+        bountyToken.safeTransfer(beneficiary, amount);
 
         emit ClaimSettled(beneficiary, amount);
     }
@@ -90,6 +92,6 @@ contract TruthBountyClaims is AccessControl, ReentrancyGuard {
      * @param amount The amount to transfer.
      */
     function rescueTokens(address token, address to, uint256 amount) external onlyRole(TREASURY_ROLE) {
-        IERC20(token).transfer(to, amount);
+        IERC20(token).safeTransfer(to, amount);
     }
 }
