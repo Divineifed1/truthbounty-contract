@@ -257,7 +257,8 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable {
             effectiveStake: effectiveStake,
             reputationScore: reputationScore,
             rewardClaimed: false,
-            stakeReturned: false
+            stakeReturned: false,
+            slashAmount: 0
         });
 
         // Update claim totals with WEIGHTED stakes
