@@ -365,12 +365,12 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable {
         bool isWinner = (vote.support == settlement.passed);
 
         uint256 stakeToReturn;
+        uint256 slashAmount = vote.slashAmount; // Use pre-calculated slash amount (no recalculation)
 
         if (isWinner) {
             stakeToReturn = vote.stakeAmount;
         } else {
-            // Losers get stake back minus slashing (80% of RAW stake)
-            uint256 slashAmount = (vote.stakeAmount * SLASH_PERCENT) / 100;
+            // Losers get stake back minus slashing (pre-calculated at settlement)
             stakeToReturn = vote.stakeAmount - slashAmount;
 
             emit StakeSlashed(claimId, msg.sender, slashAmount);
@@ -380,7 +380,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable {
         verifierStakes[msg.sender].activeStakes -= vote.stakeAmount;
 
         if (!isWinner) {
-            verifierStakes[msg.sender].totalStaked -= (vote.stakeAmount - stakeToReturn);
+            verifierStakes[msg.sender].totalStaked -= slashAmount;
         }
 
         if (stakeToReturn > 0) {
@@ -473,6 +473,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable {
 
     /**
      * @notice Calculate settlement based on weighted stakes
+     * @dev Assigns per-vote slash amounts to prevent double-slashing
      */
     function _calculateSettlement(
         uint256 claimId,
@@ -484,11 +485,8 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable {
         uint256 winnerWeightedStake = passed ? claim.totalWeightedFor : claim.totalWeightedAgainst;
         uint256 loserWeightedStake = passed ? claim.totalWeightedAgainst : claim.totalWeightedFor;
 
-        // Calculate total RAW stake from losers for slashing
-        uint256 loserRawStake = _calculateLoserRawStake(claimId, passed);
-
-        // Slash 20% of loser's RAW stake
-        slashedAmount = (loserRawStake * SLASH_PERCENT) / 100;
+        // Calculate and assign per-vote slash amounts, returns total slashed
+        slashedAmount = _assignPerVoteSlashes(claimId, passed);
 
         // 80% of slashed goes to winners as rewards
         rewardAmount = (slashedAmount * REWARD_PERCENT) / 100;
@@ -503,6 +501,35 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable {
             winnerWeightedStake: winnerWeightedStake,
             loserWeightedStake: loserWeightedStake
         });
+    }
+
+    /**
+     * @notice Assign per-vote slash amounts to each loser
+     * @dev Iterates through all voters and stores slash amount in Vote struct for losers
+     * @return totalSlashed Sum of all slash amounts
+     */
+    function _assignPerVoteSlashes(
+        uint256 claimId,
+        bool passed
+    ) internal returns (uint256 totalSlashed) {
+        address[] storage voters = claimVoters[claimId];
+        
+        for (uint256 i = 0; i < voters.length; i++) {
+            address voter = voters[i];
+            Vote storage vote = votes[claimId][voter];
+            
+            bool isLoser = (vote.support != passed);
+            
+            if (isLoser) {
+                // Calculate slash as 20% of their RAW stake
+                uint256 slashAmount = (vote.stakeAmount * SLASH_PERCENT) / 100;
+                vote.slashAmount = slashAmount;
+                totalSlashed += slashAmount;
+            } else {
+                // Winners are not slashed
+                vote.slashAmount = 0;
+            }
+        }
     }
 
     /**
