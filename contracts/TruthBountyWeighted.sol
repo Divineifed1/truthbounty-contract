@@ -87,6 +87,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable, Govern
         uint256 reputationScore;       // Reputation score at vote time (NEW)
         bool rewardClaimed;
         bool stakeReturned;
+        uint256 slashAmount;           // Per-vote slash amount calculated at settlement (prevents double-slash)
     }
 
     struct SettlementResult {
@@ -108,6 +109,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable, Govern
     mapping(uint256 => SettlementResult) public settlementResults;
     mapping(uint256 => mapping(address => Vote)) public votes;
     mapping(address => VerifierStake) public verifierStakes;
+    mapping(uint256 => address[]) private claimVoters;  // Track all voters per claim for settlement
 
     uint256 public claimCounter;
     uint256 public totalSlashed;
@@ -242,7 +244,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable, Govern
         uint256 stakeAmount
     ) external nonReentrant whenNotPaused {
         Claim storage claim = claims[claimId];
-        require(claim.id == claimId, "Claim does not exist");
+        require(claim.submitter != address(0), "Claim does not exist");
         require(block.timestamp < claim.verificationWindowEnd, "Verification window closed");
         require(!claim.settled, "Claim already settled");
         require(!votes[claimId][msg.sender].voted, "Already voted");
@@ -268,8 +270,12 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable, Govern
             effectiveStake: effectiveStake,
             reputationScore: reputationScore,
             rewardClaimed: false,
-            stakeReturned: false
+            stakeReturned: false,
+            slashAmount: 0
         });
+
+        // Track this voter for settlement calculations
+        claimVoters[claimId].push(msg.sender);
 
         // Update claim totals with WEIGHTED stakes
         if (support) {
@@ -288,7 +294,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable, Govern
      */
     function settleClaim(uint256 claimId) external nonReentrant {
         Claim storage claim = claims[claimId];
-        require(claim.id == claimId, "Claim does not exist");
+        require(claim.submitter != address(0), "Claim does not exist");
         require(block.timestamp >= claim.verificationWindowEnd, "Verification window not closed");
         require(!claim.settled, "Claim already settled");
         require(claim.totalStakeAmount > 0, "No votes cast");
@@ -320,7 +326,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable, Govern
      */
     function claimSettlementRewards(uint256 claimId) external nonReentrant {
         Claim storage claim = claims[claimId];
-        require(claim.id == claimId, "Claim does not exist");
+        require(claim.submitter != address(0), "Claim does not exist");
         require(claim.settled, "Claim not settled");
 
         Vote storage vote = votes[claimId][msg.sender];
@@ -360,7 +366,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable, Govern
      */
     function withdrawSettledStake(uint256 claimId) external nonReentrant {
         Claim storage claim = claims[claimId];
-        require(claim.id == claimId, "Claim does not exist");
+        require(claim.submitter != address(0), "Claim does not exist");
         require(claim.settled, "Claim not settled");
 
         Vote storage vote = votes[claimId][msg.sender];
@@ -371,12 +377,14 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable, Govern
         bool isWinner = (vote.support == settlement.passed);
 
         uint256 stakeToReturn;
+        uint256 slashAmount = vote.slashAmount; // Use pre-calculated slash amount (no recalculation)
 
         if (isWinner) {
             stakeToReturn = vote.stakeAmount;
         } else {
             // Losers get stake back minus slashing (80% of RAW stake)
             uint256 slashAmount = (vote.stakeAmount * slashPercent) / 100;
+            // Losers get stake back minus slashing (pre-calculated at settlement)
             stakeToReturn = vote.stakeAmount - slashAmount;
 
             emit StakeSlashed(claimId, msg.sender, slashAmount);
@@ -386,7 +394,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable, Govern
         verifierStakes[msg.sender].activeStakes -= vote.stakeAmount;
 
         if (!isWinner) {
-            verifierStakes[msg.sender].totalStaked -= (vote.stakeAmount - stakeToReturn);
+            verifierStakes[msg.sender].totalStaked -= slashAmount;
         }
 
         if (stakeToReturn > 0) {
@@ -479,6 +487,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable, Govern
 
     /**
      * @notice Calculate settlement based on weighted stakes
+     * @dev Assigns per-vote slash amounts to prevent double-slashing
      */
     function _calculateSettlement(
         uint256 claimId,
@@ -495,6 +504,8 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable, Govern
 
         // Slash 20% of loser's RAW stake
         slashedAmount = (loserRawStake * slashPercent) / 100;
+        // Calculate and assign per-vote slash amounts, returns total slashed
+        slashedAmount = _assignPerVoteSlashes(claimId, passed);
 
         // 80% of slashed goes to winners as rewards
         rewardAmount = (slashedAmount * rewardPercent) / 100;
@@ -509,6 +520,35 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable, Govern
             winnerWeightedStake: winnerWeightedStake,
             loserWeightedStake: loserWeightedStake
         });
+    }
+
+    /**
+     * @notice Assign per-vote slash amounts to each loser
+     * @dev Iterates through all voters and stores slash amount in Vote struct for losers
+     * @return totalSlashed Sum of all slash amounts
+     */
+    function _assignPerVoteSlashes(
+        uint256 claimId,
+        bool passed
+    ) internal returns (uint256 totalSlashed) {
+        address[] storage voters = claimVoters[claimId];
+        
+        for (uint256 i = 0; i < voters.length; i++) {
+            address voter = voters[i];
+            Vote storage vote = votes[claimId][voter];
+            
+            bool isLoser = (vote.support != passed);
+            
+            if (isLoser) {
+                // Calculate slash as 20% of their RAW stake
+                uint256 slashAmount = (vote.stakeAmount * SLASH_PERCENT) / 100;
+                vote.slashAmount = slashAmount;
+                totalSlashed += slashAmount;
+            } else {
+                // Winners are not slashed
+                vote.slashAmount = 0;
+            }
+        }
     }
 
     /**

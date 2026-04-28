@@ -236,7 +236,7 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable, GovernanceOwna
 
     function vote(uint256 claimId, bool support, uint256 stakeAmount) external nonReentrant whenNotPaused {
         Claim storage claim = claims[claimId];
-        require(claim.id == claimId, "Claim does not exist");
+        require(claim.submitter != address(0), "Claim does not exist");
         require(block.timestamp < claim.verificationWindowEnd, "Verification window closed");
         require(!claim.settled, "Claim already settled");
         require(!votes[claimId][msg.sender].voted, "Already voted");
@@ -262,7 +262,7 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable, GovernanceOwna
 
     function settleClaim(uint256 claimId) external nonReentrant {
         Claim storage claim = claims[claimId];
-        require(claim.id == claimId, "Claim does not exist");
+        require(claim.submitter != address(0), "Claim does not exist");
         require(block.timestamp >= claim.verificationWindowEnd, "Verification window not closed");
         require(!claim.settled, "Claim already settled");
         require(claim.totalStakeAmount > 0, "No votes cast");
@@ -329,6 +329,39 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable, GovernanceOwna
             verifierStakes[msg.sender].activeStakes -= vote.stakeAmount;
             require(bountyToken.transfer(msg.sender, vote.stakeAmount), "Stake transfer failed");
         }
+    }
+
+    function withdrawSettledStake(uint256 claimId) external nonReentrant {
+        Claim storage claim = claims[claimId];
+        require(claim.settled, "Claim not settled");
+
+        Vote storage vote = votes[claimId][msg.sender];
+        require(vote.voted, "No vote cast");
+        require(!vote.stakeReturned, "Stake already returned");
+
+        SettlementResult storage settlement = settlementResults[claimId];
+
+        bool isWinner = (vote.support == settlement.passed);
+        require(!isWinner, "Winners should use claimSettlementRewards");
+
+        // Calculate slashed portion
+        uint256 slashedAmount = (vote.stakeAmount * slashPercent) / 100;
+        uint256 returnAmount = vote.stakeAmount - slashedAmount;
+
+        vote.stakeReturned = true;
+
+        // Update accounting
+        verifierStakes[msg.sender].activeStakes -= vote.stakeAmount;
+
+        // Transfer remaining stake
+        if (returnAmount > 0) {
+            require(
+                bountyToken.transfer(msg.sender, returnAmount),
+                "Stake transfer failed"
+            );
+        }
+
+        emit StakeWithdrawn(msg.sender, returnAmount);
     }
 
     function withdrawStake(uint256 amount) external nonReentrant {
