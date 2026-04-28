@@ -232,7 +232,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable {
         uint256 stakeAmount
     ) external nonReentrant whenNotPaused {
         Claim storage claim = claims[claimId];
-        require(claim.id == claimId, "Claim does not exist");
+        require(claim.submitter != address(0), "Claim does not exist");
         require(block.timestamp < claim.verificationWindowEnd, "Verification window closed");
         require(!claim.settled, "Claim already settled");
         require(!votes[claimId][msg.sender].voted, "Already voted");
@@ -282,7 +282,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable {
      */
     function settleClaim(uint256 claimId) external nonReentrant {
         Claim storage claim = claims[claimId];
-        require(claim.id == claimId, "Claim does not exist");
+        require(claim.submitter != address(0), "Claim does not exist");
         require(block.timestamp >= claim.verificationWindowEnd, "Verification window not closed");
         require(!claim.settled, "Claim already settled");
         require(claim.totalStakeAmount > 0, "No votes cast");
@@ -314,7 +314,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable {
      */
     function claimSettlementRewards(uint256 claimId) external nonReentrant {
         Claim storage claim = claims[claimId];
-        require(claim.id == claimId, "Claim does not exist");
+        require(claim.submitter != address(0), "Claim does not exist");
         require(claim.settled, "Claim not settled");
 
         Vote storage vote = votes[claimId][msg.sender];
@@ -354,7 +354,7 @@ contract TruthBountyWeighted is AccessControl, ReentrancyGuard, Pausable {
      */
     function withdrawSettledStake(uint256 claimId) external nonReentrant {
         Claim storage claim = claims[claimId];
-        require(claim.id == claimId, "Claim does not exist");
+        require(claim.submitter != address(0), "Claim does not exist");
         require(claim.settled, "Claim not settled");
 
         Vote storage vote = votes[claimId][msg.sender];

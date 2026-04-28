@@ -236,7 +236,7 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable, GovernanceOwna
 
     function vote(uint256 claimId, bool support, uint256 stakeAmount) external nonReentrant whenNotPaused {
         Claim storage claim = claims[claimId];
-        require(claim.id == claimId, "Claim does not exist");
+        require(claim.submitter != address(0), "Claim does not exist");
         require(block.timestamp < claim.verificationWindowEnd, "Verification window closed");
         require(!claim.settled, "Claim already settled");
         require(!votes[claimId][msg.sender].voted, "Already voted");
@@ -262,7 +262,7 @@ contract TruthBounty is AccessControl, ReentrancyGuard, Pausable, GovernanceOwna
 
     function settleClaim(uint256 claimId) external nonReentrant {
         Claim storage claim = claims[claimId];
-        require(claim.id == claimId, "Claim does not exist");
+        require(claim.submitter != address(0), "Claim does not exist");
         require(block.timestamp >= claim.verificationWindowEnd, "Verification window not closed");
         require(!claim.settled, "Claim already settled");
         require(claim.totalStakeAmount > 0, "No votes cast");
