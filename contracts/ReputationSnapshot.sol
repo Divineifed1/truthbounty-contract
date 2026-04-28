@@ -142,19 +142,43 @@ contract ReputationSnapshot is AccessControl {
         if (length == 0) return bytes32(0);
         if (length == 1) return leaves[0];
 
-        while (length > 1) {
-            if (length % 2 != 0) {
-                leaves[length] = leaves[length - 1]; // Duplicate last element
-                length++;
-            }
-
-            for (uint256 i = 0; i < length; i += 2) {
-                leaves[i / 2] = keccak256(abi.encodePacked(leaves[i], leaves[i + 1]));
-            }
-            length /= 2;
+        // Create a working copy that we can modify
+        bytes32[] memory currentLevel = new bytes32[](length);
+        for (uint256 i = 0; i < length; i++) {
+            currentLevel[i] = leaves[i];
         }
 
-        return leaves[0];
+        uint256 currentLength = length;
+
+        while (currentLength > 1) {
+            // If odd number of nodes, duplicate the last one
+            if (currentLength % 2 != 0) {
+                // Create a new level with one extra slot for the duplicate
+                bytes32[] memory nextLevel = new bytes32[]((currentLength + 1) / 2);
+                
+                // Process pairs
+                for (uint256 i = 0; i < currentLength; i += 2) {
+                    bytes32 left = currentLevel[i];
+                    bytes32 right = (i + 1 < currentLength) ? currentLevel[i + 1] : currentLevel[i]; // Duplicate last if odd
+                    nextLevel[i / 2] = keccak256(abi.encodePacked(left, right));
+                }
+                
+                currentLevel = nextLevel;
+                currentLength = (currentLength + 1) / 2;
+            } else {
+                // Even number of nodes
+                bytes32[] memory nextLevel = new bytes32[](currentLength / 2);
+                
+                for (uint256 i = 0; i < currentLength; i += 2) {
+                    nextLevel[i / 2] = keccak256(abi.encodePacked(currentLevel[i], currentLevel[i + 1]));
+                }
+                
+                currentLevel = nextLevel;
+                currentLength = currentLength / 2;
+            }
+        }
+
+        return currentLevel[0];
     }
 
     /**

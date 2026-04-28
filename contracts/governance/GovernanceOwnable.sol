@@ -3,6 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/utils/Pausable.sol";
 import "./GovernanceHooks.sol";
 
 /**
@@ -17,7 +18,7 @@ import "./GovernanceHooks.sol";
  * - Upgrade authorization flow
  * - Role management integration
  */
-abstract contract GovernanceOwnable is AccessControl {
+abstract contract GovernanceOwnable is AccessControl, Pausable {
     // ============ Constants ============
     
     bytes32 public constant GOVERNANCE_ROLE = keccak256("GOVERNANCE_ROLE");

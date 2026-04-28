@@ -66,6 +66,15 @@ contract GovernanceController is AccessControl, ReentrancyGuard, GovernanceHooks
     error NoValueChange();
     error ZeroAddress();
 
+    // ============ Modifiers ============
+    
+    modifier onlyProposalExecutor() {
+        if (!hasRole(GovernorAccess.PROPOSAL_EXECUTOR_ROLE, msg.sender)) {
+            revert AccessControl.AccessDenied();
+        }
+        _;
+    }
+
     // ============ Events ============
     
     event ProposalTimelockUpdated(uint256 oldTimelock, uint256 newTimelock);

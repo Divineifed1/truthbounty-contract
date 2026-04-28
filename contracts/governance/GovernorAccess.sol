@@ -44,7 +44,7 @@ library GovernorAccess {
     // ============ Data Structures ============
 
     /// @notice Tracks pending role assignment proposals
-    struct Role proposal {
+    struct RoleProposal {
         bytes32 proposalId;
         address account;
         bytes32 role;
