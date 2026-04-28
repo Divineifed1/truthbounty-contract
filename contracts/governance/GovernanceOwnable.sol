@@ -96,7 +96,7 @@ abstract contract GovernanceOwnable is AccessControl {
         
         // Grant roles
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
-        _grantRole(GOVERVERNANCE_ADMIN_ROLE, _admin);
+        _grantRole(GOVERNANCE_ADMIN_ROLE, _admin);
         
         if (_governanceController != address(0)) {
             _grantRole(GOVERNANCE_ROLE, _governanceController);
@@ -175,7 +175,7 @@ abstract contract GovernanceOwnable is AccessControl {
         
         // Revoke old governance role
         if (oldController != address(0)) {
-            _revokeRole(GOVERVERNANCE_ROLE, oldController);
+            _revokeRole(GOVERNANCE_ROLE, oldController);
         }
         
         governanceController = _newController;
